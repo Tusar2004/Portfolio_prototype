@@ -1,707 +1,1132 @@
-import React, { useEffect, useRef, useState } from 'react';
-import * as THREE from 'three';
+// src/StartScreen.tsx
+import { useEffect, useState, useRef, Suspense, useMemo } from "react";
+import { Canvas, useFrame, useThree } from "@react-three/fiber";
+import * as THREE from "three";
 
-const SpacePortfolio = () => {
-  const containerRef = useRef(null);
-  const [loading, setLoading] = useState(true);
-  const [loadProgress, setLoadProgress] = useState(0);
-
-  useEffect(() => {
-    if (!containerRef.current) return;
-
-    // Scene setup
-    const scene = new THREE.Scene();
-    const camera = new THREE.PerspectiveCamera(
-      60,
-      window.innerWidth / window.innerHeight,
-      0.1,
-      10000
-    );
-    camera.position.set(0, 250, 400);
+// ============================================
+// CAMERA CONTROLLER
+// ============================================
+function CameraController() {
+  const { camera } = useThree();
+  
+  useFrame((state) => {
+    const t = state.clock.elapsedTime;
+    camera.position.x = Math.sin(t * 0.1) * 0.5;
+    camera.position.y = Math.cos(t * 0.15) * 0.3;
     camera.lookAt(0, 0, 0);
+  });
+  
+  return null;
+}
 
-    const renderer = new THREE.WebGLRenderer({ antialias: true, alpha: true });
-    renderer.setSize(window.innerWidth, window.innerHeight);
-    renderer.setPixelRatio(window.devicePixelRatio);
-    renderer.shadowMap.enabled = true;
-    renderer.shadowMap.type = THREE.PCFSoftShadowMap;
-    containerRef.current.appendChild(renderer.domElement);
-
-    // Enhanced Starfield
-    const createStarfield = () => {
-      const starGeometry = new THREE.BufferGeometry();
-      const starCount = 15000;
-      const positions = new Float32Array(starCount * 3);
-      const colors = new Float32Array(starCount * 3);
-      const sizes = new Float32Array(starCount);
-
-      for (let i = 0; i < starCount; i++) {
-        const i3 = i * 3;
-        positions[i3] = (Math.random() - 0.5) * 5000;
-        positions[i3 + 1] = (Math.random() - 0.5) * 5000;
-        positions[i3 + 2] = (Math.random() - 0.5) * 5000;
-
-        const color = new THREE.Color();
-        const colorChoice = Math.random();
-        if (colorChoice < 0.6) {
-          color.setHSL(0, 0, 1);
-        } else if (colorChoice < 0.8) {
-          color.setHSL(0.6, 0.5, 0.95);
-        } else if (colorChoice < 0.9) {
-          color.setHSL(0.1, 0.7, 0.9);
-        } else {
-          color.setHSL(0.55, 0.8, 0.85);
+// ============================================
+// ADVANCED 3D ROCKET
+// ============================================
+function RocketModel() {
+  const rocketRef = useRef<THREE.Group>(null);
+  const flameRef = useRef<THREE.Group>(null);
+  const exhaustRef = useRef<THREE.Points>(null);
+  const glowRef = useRef<THREE.Mesh>(null);
+  
+  const exhaustParticles = useMemo(() => {
+    const count = 200;
+    const positions = new Float32Array(count * 3);
+    const velocities = new Float32Array(count * 3);
+    const lifetimes = new Float32Array(count);
+    
+    for (let i = 0; i < count; i++) {
+      positions[i * 3] = (Math.random() - 0.5) * 0.4;
+      positions[i * 3 + 1] = -2.5 - Math.random() * 3;
+      positions[i * 3 + 2] = (Math.random() - 0.5) * 0.4;
+      
+      velocities[i * 3] = (Math.random() - 0.5) * 0.03;
+      velocities[i * 3 + 1] = -0.1 - Math.random() * 0.05;
+      velocities[i * 3 + 2] = (Math.random() - 0.5) * 0.03;
+      
+      lifetimes[i] = Math.random();
+    }
+    
+    return { positions, velocities, lifetimes };
+  }, []);
+  
+  useFrame((state, delta) => {
+    if (!rocketRef.current) return;
+    
+    const t = state.clock.elapsedTime;
+    
+    // Smooth floating animation
+    rocketRef.current.position.y = Math.sin(t * 0.5) * 0.5 + Math.cos(t * 0.3) * 0.2;
+    rocketRef.current.rotation.y = Math.sin(t * 0.4) * 0.2;
+    rocketRef.current.rotation.z = Math.cos(t * 0.5) * 0.1;
+    rocketRef.current.rotation.x = Math.sin(t * 0.3) * 0.05;
+    
+    // Flame animation
+    if (flameRef.current) {
+      flameRef.current.children.forEach((child, idx) => {
+        if (child instanceof THREE.Mesh) {
+          const scale = 1 + Math.sin(t * 15 + idx) * 0.4;
+          child.scale.set(1, scale, 1);
+          child.material.opacity = 0.6 + Math.sin(t * 20 + idx * 2) * 0.3;
         }
-        colors[i3] = color.r;
-        colors[i3 + 1] = color.g;
-        colors[i3 + 2] = color.b;
-
-        sizes[i] = Math.random() * 3 + 1;
-      }
-
-      starGeometry.setAttribute('position', new THREE.BufferAttribute(positions, 3));
-      starGeometry.setAttribute('color', new THREE.BufferAttribute(colors, 3));
-      starGeometry.setAttribute('size', new THREE.BufferAttribute(sizes, 1));
-
-      const starMaterial = new THREE.PointsMaterial({
-        size: 2,
-        vertexColors: true,
-        transparent: true,
-        opacity: 0.9,
-        sizeAttenuation: true
       });
-
-      return new THREE.Points(starGeometry, starMaterial);
-    };
-
-    const stars = createStarfield();
-    scene.add(stars);
-
-    // Nebula
-    const createNebula = () => {
-      const nebulaGroup = new THREE.Group();
-      const colors = [0x4a0e4e, 0x1a0a3e, 0x0a1a2e, 0x2a1a4e];
+    }
+    
+    // Exhaust particles
+    if (exhaustRef.current) {
+      const positions = exhaustRef.current.geometry.attributes.position.array as Float32Array;
       
-      for (let i = 0; i < 5; i++) {
-        const geometry = new THREE.SphereGeometry(400, 32, 32);
-        const material = new THREE.MeshBasicMaterial({
-          color: colors[i % colors.length],
-          transparent: true,
-          opacity: 0.05,
-          side: THREE.BackSide
-        });
-        const nebula = new THREE.Mesh(geometry, material);
-        nebula.position.set(
-          (Math.random() - 0.5) * 1500,
-          (Math.random() - 0.5) * 800,
-          (Math.random() - 0.5) * 1500
-        );
-        nebulaGroup.add(nebula);
-      }
-      
-      return nebulaGroup;
-    };
-
-    const nebula = createNebula();
-    scene.add(nebula);
-
-    // Lighting
-    const ambientLight = new THREE.AmbientLight(0x333333, 0.4);
-    scene.add(ambientLight);
-
-    const sunLight = new THREE.PointLight(0xffffff, 3, 2000);
-    sunLight.position.set(0, 0, 0);
-    sunLight.castShadow = true;
-    sunLight.shadow.mapSize.width = 2048;
-    sunLight.shadow.mapSize.height = 2048;
-    scene.add(sunLight);
-
-    // Enhanced Sun with corona
-    const createSun = () => {
-      const sunGroup = new THREE.Group();
-      
-      // Main sun body
-      const sunGeometry = new THREE.SphereGeometry(35, 64, 64);
-      const sunMaterial = new THREE.MeshBasicMaterial({
-        color: 0xfdb813,
-        emissive: 0xfdb813,
-        emissiveIntensity: 1
-      });
-      const sun = new THREE.Mesh(sunGeometry, sunMaterial);
-      sunGroup.add(sun);
-
-      // Multiple glow layers for corona effect
-      const glowLayers = [
-        { size: 40, color: 0xffaa00, opacity: 0.4 },
-        { size: 46, color: 0xff8800, opacity: 0.3 },
-        { size: 53, color: 0xff6600, opacity: 0.2 },
-        { size: 60, color: 0xff4400, opacity: 0.1 }
-      ];
-
-      glowLayers.forEach(layer => {
-        const glowGeometry = new THREE.SphereGeometry(layer.size, 64, 64);
-        const glowMaterial = new THREE.MeshBasicMaterial({
-          color: layer.color,
-          transparent: true,
-          opacity: layer.opacity,
-          side: THREE.BackSide
-        });
-        const glow = new THREE.Mesh(glowGeometry, glowMaterial);
-        sunGroup.add(glow);
-      });
-
-      return sunGroup;
-    };
-
-    const sunGroup = createSun();
-    scene.add(sunGroup);
-
-    // Create realistic planet texture
-    const createPlanetTexture = (color, hasAtmosphere = false) => {
-      const canvas = document.createElement('canvas');
-      canvas.width = 512;
-      canvas.height = 512;
-      const ctx = canvas.getContext('2d');
-      
-      // Base color
-      ctx.fillStyle = `#${color.toString(16).padStart(6, '0')}`;
-      ctx.fillRect(0, 0, 512, 512);
-      
-      // Add surface details
-      for (let i = 0; i < 200; i++) {
-        const x = Math.random() * 512;
-        const y = Math.random() * 512;
-        const radius = Math.random() * 30 + 5;
-        const darkness = Math.random() * 0.3;
+      for (let i = 0; i < positions.length; i += 3) {
+        positions[i] += exhaustParticles.velocities[i] * delta * 60;
+        positions[i + 1] += exhaustParticles.velocities[i + 1] * delta * 60;
+        positions[i + 2] += exhaustParticles.velocities[i + 2] * delta * 60;
         
-        ctx.beginPath();
-        ctx.arc(x, y, radius, 0, Math.PI * 2);
-        ctx.fillStyle = `rgba(0, 0, 0, ${darkness})`;
-        ctx.fill();
-      }
-      
-      // Add bright spots (minerals/ice)
-      for (let i = 0; i < 50; i++) {
-        const x = Math.random() * 512;
-        const y = Math.random() * 512;
-        const radius = Math.random() * 10 + 2;
-        const brightness = Math.random() * 0.3;
+        exhaustParticles.lifetimes[i / 3] -= delta * 0.5;
         
-        ctx.beginPath();
-        ctx.arc(x, y, radius, 0, Math.PI * 2);
-        ctx.fillStyle = `rgba(255, 255, 255, ${brightness})`;
-        ctx.fill();
+        if (exhaustParticles.lifetimes[i / 3] <= 0 || positions[i + 1] < -6) {
+          positions[i] = (Math.random() - 0.5) * 0.4;
+          positions[i + 1] = -2.5;
+          positions[i + 2] = (Math.random() - 0.5) * 0.4;
+          exhaustParticles.lifetimes[i / 3] = 1;
+        }
       }
       
-      const texture = new THREE.CanvasTexture(canvas);
-      return texture;
-    };
-
-    // Planet data with realistic details
-    const planetsData = [
-      { name: 'Mercury', radius: 4, distance: 60, color: 0x8c7853, speed: 0.04, tilt: 0.02, hasRings: false },
-      { name: 'Venus', radius: 6, distance: 85, color: 0xffc649, speed: 0.03, tilt: 0.03, hasRings: false },
-      { name: 'Earth', radius: 7, distance: 115, color: 0x4a90e2, speed: 0.025, tilt: 0.025, hasRings: false },
-      { name: 'Mars', radius: 5, distance: 145, color: 0xe27b58, speed: 0.02, tilt: 0.028, hasRings: false },
-      { name: 'Jupiter', radius: 20, distance: 220, color: 0xc88b3a, speed: 0.012, tilt: 0.015, hasRings: false },
-      { name: 'Saturn', radius: 17, distance: 300, color: 0xfad5a5, speed: 0.009, tilt: 0.025, hasRings: true },
-      { name: 'Uranus', radius: 12, distance: 380, color: 0x4fd0e7, speed: 0.006, tilt: 0.022, hasRings: true },
-      { name: 'Neptune', radius: 11, distance: 450, color: 0x4166f5, speed: 0.005, tilt: 0.018, hasRings: false }
-    ];
-
-    const planets = [];
-    const orbitLines = [];
-
-    planetsData.forEach((data, index) => {
-      // Create 3D orbit visualization
-      const orbitGeometry = new THREE.TorusGeometry(data.distance, 0.3, 16, 100);
-      const orbitMaterial = new THREE.MeshBasicMaterial({
-        color: 0x4444ff,
-        transparent: true,
-        opacity: 0.4,
-        side: THREE.DoubleSide
-      });
-      const orbit3D = new THREE.Mesh(orbitGeometry, orbitMaterial);
-      orbit3D.rotation.x = Math.PI / 2;
-      orbit3D.rotation.y = data.tilt * 5;
-      scene.add(orbit3D);
-      orbitLines.push(orbit3D);
-
-      // Create planet with texture
-      const geometry = new THREE.SphereGeometry(data.radius, 64, 64);
-      const texture = createPlanetTexture(data.color);
-      const material = new THREE.MeshStandardMaterial({
-        map: texture,
-        roughness: 0.8,
-        metalness: 0.2,
-        emissive: data.color,
-        emissiveIntensity: 0.1
-      });
-      const planet = new THREE.Mesh(geometry, material);
-      planet.castShadow = true;
-      planet.receiveShadow = true;
-
-      // Add atmosphere for Earth, Venus, Uranus, Neptune
-      if (index === 1 || index === 2 || index === 6 || index === 7) {
-        const atmoGeometry = new THREE.SphereGeometry(data.radius * 1.1, 64, 64);
-        const atmoMaterial = new THREE.MeshBasicMaterial({
-          color: index === 2 ? 0x6ab7ff : data.color,
-          transparent: true,
-          opacity: 0.15,
-          side: THREE.BackSide
-        });
-        const atmosphere = new THREE.Mesh(atmoGeometry, atmoMaterial);
-        planet.add(atmosphere);
-      }
-
-      // Saturn and Uranus rings
-      if (data.hasRings) {
-        const ringGeometry = new THREE.RingGeometry(
-          data.radius * 1.5, 
-          data.radius * 2.5, 
-          64
+      exhaustRef.current.geometry.attributes.position.needsUpdate = true;
+    }
+    
+    // Pulsing glow
+    if (glowRef.current) {
+      const glowScale = 1 + Math.sin(t * 3) * 0.15;
+      glowRef.current.scale.set(glowScale, glowScale, glowScale);
+    }
+  });
+  
+  return (
+    <group ref={rocketRef} position={[0, 0, 0]}>
+      {/* Outer glow sphere */}
+      <mesh ref={glowRef}>
+        <sphereGeometry args={[2, 32, 32]} />
+        <meshBasicMaterial
+          color="#0ea5e9"
+          transparent
+          opacity={0.05}
+          side={THREE.BackSide}
+        />
+      </mesh>
+      
+      {/* Main Rocket Body - Metallic with panels */}
+      <mesh castShadow receiveShadow>
+        <cylinderGeometry args={[0.5, 0.55, 3.5, 32]} />
+        <meshStandardMaterial
+          color="#1a2332"
+          metalness={0.95}
+          roughness={0.15}
+          envMapIntensity={1.5}
+        />
+      </mesh>
+      
+      {/* Body Panels */}
+      {[0, 90, 180, 270].map((angle, i) => {
+        const rad = (angle * Math.PI) / 180;
+        return (
+          <mesh
+            key={`panel-${i}`}
+            position={[Math.cos(rad) * 0.52, 0, Math.sin(rad) * 0.52]}
+            rotation={[0, rad, 0]}
+            castShadow
+          >
+            <boxGeometry args={[0.12, 3, 0.05]} />
+            <meshStandardMaterial
+              color="#0ea5e9"
+              metalness={1}
+              roughness={0.1}
+              emissive="#0ea5e9"
+              emissiveIntensity={0.5}
+            />
+          </mesh>
         );
-        const ringMaterial = new THREE.MeshStandardMaterial({
-          color: index === 5 ? 0xc9b582 : 0x88ccdd,
-          side: THREE.DoubleSide,
-          transparent: true,
-          opacity: 0.8,
-          roughness: 0.9
-        });
-        const ring = new THREE.Mesh(ringGeometry, ringMaterial);
-        ring.rotation.x = Math.PI / 2;
-        planet.add(ring);
+      })}
+      
+      {/* Nose Cone - Sharp */}
+      <mesh position={[0, 2.1, 0]} castShadow>
+        <coneGeometry args={[0.5, 1, 32]} />
+        <meshStandardMaterial
+          color="#0ea5e9"
+          metalness={0.9}
+          roughness={0.05}
+          emissive="#0ea5e9"
+          emissiveIntensity={0.8}
+        />
+      </mesh>
+      
+      {/* Nose Tip Glow */}
+      <mesh position={[0, 2.7, 0]}>
+        <sphereGeometry args={[0.1, 16, 16]} />
+        <meshBasicMaterial color="#00ffff" />
+        <pointLight color="#00ffff" intensity={3} distance={6} />
+      </mesh>
+      
+      {/* Command Module Windows */}
+      {[1, 0.4, -0.2].map((y, i) => (
+        <group key={`window-${i}`}>
+          <mesh position={[0, y, 0.52]} rotation={[0, 0, 0]}>
+            <circleGeometry args={[0.2, 32]} />
+            <meshStandardMaterial
+              color="#00d4ff"
+              emissive="#00d4ff"
+              emissiveIntensity={2}
+              metalness={0.3}
+              roughness={0}
+            />
+          </mesh>
+          <pointLight
+            position={[0, y, 0.6]}
+            color="#00d4ff"
+            intensity={1.2}
+            distance={4}
+          />
+          {/* Window glow rings */}
+          <mesh position={[0, y, 0.53]} rotation={[0, 0, 0]}>
+            <ringGeometry args={[0.2, 0.25, 32]} />
+            <meshBasicMaterial
+              color="#00d4ff"
+              transparent
+              opacity={0.5}
+              side={THREE.DoubleSide}
+            />
+          </mesh>
+        </group>
+      ))}
+      
+      {/* Tech Rings */}
+      {[1.3, 0.6, -0.4, -1.2].map((y, i) => (
+        <mesh key={`ring-${i}`} position={[0, y, 0]} rotation={[Math.PI / 2, 0, 0]}>
+          <torusGeometry args={[0.52, 0.05, 16, 64]} />
+          <meshStandardMaterial
+            color="#00d4ff"
+            metalness={1}
+            roughness={0}
+            emissive="#00d4ff"
+            emissiveIntensity={1.2}
+          />
+        </mesh>
+      ))}
+      
+      {/* Landing Fins - Large and prominent */}
+      {[0, 120, 240].map((angle, i) => {
+        const rad = (angle * Math.PI) / 180;
+        return (
+          <group key={`fin-${i}`}>
+            <mesh
+              position={[
+                Math.cos(rad) * 0.55,
+                -1.4,
+                Math.sin(rad) * 0.55
+              ]}
+              rotation={[0, rad, 0]}
+              castShadow
+            >
+              <boxGeometry args={[0.1, 1.2, 0.8]} />
+              <meshStandardMaterial
+                color="#0ea5e9"
+                metalness={0.98}
+                roughness={0.05}
+                emissive="#0ea5e9"
+                emissiveIntensity={0.6}
+              />
+            </mesh>
+            {/* Fin edge lights */}
+            <mesh
+              position={[
+                Math.cos(rad) * 0.55,
+                -1.4,
+                Math.sin(rad) * 0.95
+              ]}
+              rotation={[0, rad, 0]}
+            >
+              <boxGeometry args={[0.05, 1.2, 0.02]} />
+              <meshBasicMaterial color="#00ffff" />
+            </mesh>
+          </group>
+        );
+      })}
+      
+      {/* Engine Section */}
+      <mesh position={[0, -2, 0]} castShadow>
+        <cylinderGeometry args={[0.55, 0.4, 0.7, 32]} />
+        <meshStandardMaterial
+          color="#0f1419"
+          metalness={0.9}
+          roughness={0.3}
+        />
+      </mesh>
+      
+      {/* Engine Nozzle */}
+      <mesh position={[0, -2.3, 0]} castShadow>
+        <cylinderGeometry args={[0.4, 0.3, 0.4, 32, 1, true]} />
+        <meshStandardMaterial
+          color="#1a1a2e"
+          metalness={0.95}
+          roughness={0.2}
+          side={THREE.DoubleSide}
+        />
+      </mesh>
+      
+      {/* Engine Core Glow */}
+      <mesh position={[0, -2.4, 0]}>
+        <cylinderGeometry args={[0.35, 0.25, 0.3, 32]} />
+        <meshBasicMaterial
+          color="#ff6b35"
+          transparent
+          opacity={0.9}
+        />
+      </mesh>
+      
+      {/* Rocket Flames */}
+      <group ref={flameRef} position={[0, -2.6, 0]}>
+        {/* Main flame */}
+        <mesh>
+          <coneGeometry args={[0.4, 1.5, 16]} />
+          <meshBasicMaterial
+            color="#ff9500"
+            transparent
+            opacity={0.85}
+            blending={THREE.AdditiveBlending}
+          />
+        </mesh>
+        
+        {/* Inner flame */}
+        <mesh position={[0, 0.2, 0]}>
+          <coneGeometry args={[0.3, 1.2, 16]} />
+          <meshBasicMaterial
+            color="#ffff00"
+            transparent
+            opacity={0.7}
+            blending={THREE.AdditiveBlending}
+          />
+        </mesh>
+        
+        {/* Core flame */}
+        <mesh position={[0, 0.4, 0]}>
+          <coneGeometry args={[0.2, 0.8, 16]} />
+          <meshBasicMaterial
+            color="#ffffff"
+            transparent
+            opacity={0.6}
+            blending={THREE.AdditiveBlending}
+          />
+        </mesh>
+      </group>
+      
+      {/* Exhaust Particles */}
+      <points ref={exhaustRef}>
+        <bufferGeometry>
+          <bufferAttribute
+            attach="attributes-position"
+            args={[exhaustParticles.positions, 3]}
+          />
+        </bufferGeometry>
+        <pointsMaterial
+          size={0.2}
+          color="#ff9500"
+          transparent
+          opacity={0.8}
+          blending={THREE.AdditiveBlending}
+          sizeAttenuation
+        />
+      </points>
+      
+      {/* Engine Lights */}
+      <pointLight
+        position={[0, -2.5, 0]}
+        color="#ff9500"
+        intensity={5}
+        distance={10}
+        castShadow
+      />
+      
+      {/* Side accent lights */}
+      {[0, 120, 240].map((angle, i) => {
+        const rad = (angle * Math.PI) / 180;
+        return (
+          <pointLight
+            key={`light-${i}`}
+            position={[Math.cos(rad) * 0.6, 0, Math.sin(rad) * 0.6]}
+            color="#00d4ff"
+            intensity={0.8}
+            distance={4}
+          />
+        );
+      })}
+    </group>
+  );
+}
+
+// ============================================
+// SPACE ENVIRONMENT
+// ============================================
+function SpaceEnvironment() {
+  const starsRef = useRef<THREE.Points>(null);
+  const nebula1Ref = useRef<THREE.Mesh>(null);
+  const nebula2Ref = useRef<THREE.Mesh>(null);
+  
+  const starData = useMemo(() => {
+    const count = 3000;
+    const positions = new Float32Array(count * 3);
+    const colors = new Float32Array(count * 3);
+    const sizes = new Float32Array(count);
+    
+    for (let i = 0; i < count; i++) {
+      const radius = 40 + Math.random() * 60;
+      const theta = Math.random() * Math.PI * 2;
+      const phi = Math.acos(2 * Math.random() - 1);
+      
+      positions[i * 3] = radius * Math.sin(phi) * Math.cos(theta);
+      positions[i * 3 + 1] = radius * Math.sin(phi) * Math.sin(theta);
+      positions[i * 3 + 2] = radius * Math.cos(phi);
+      
+      const colorChoice = Math.random();
+      if (colorChoice > 0.85) {
+        colors[i * 3] = 0.3;
+        colors[i * 3 + 1] = 0.8;
+        colors[i * 3 + 2] = 1.0;
+      } else if (colorChoice > 0.7) {
+        colors[i * 3] = 1.0;
+        colors[i * 3 + 1] = 0.8;
+        colors[i * 3 + 2] = 0.6;
+      } else {
+        colors[i * 3] = 1.0;
+        colors[i * 3 + 1] = 1.0;
+        colors[i * 3 + 2] = 1.0;
       }
-
-      planets.push({
-        mesh: planet,
-        distance: data.distance,
-        speed: data.speed,
-        angle: Math.random() * Math.PI * 2,
-        tilt: data.tilt,
-        rotationSpeed: 0.005 + Math.random() * 0.01
-      });
       
-      scene.add(planet);
-    });
-
-    // Enhanced Asteroid Belt
-    const asteroidGroup = new THREE.Group();
-    for (let i = 0; i < 1200; i++) {
-      const size = Math.random() * 0.8 + 0.3;
-      const geometry = new THREE.DodecahedronGeometry(size, 0);
-      const material = new THREE.MeshStandardMaterial({
-        color: 0x666666,
-        roughness: 1,
-        metalness: 0.3
-      });
-      const asteroid = new THREE.Mesh(geometry, material);
+      sizes[i] = Math.random() * 2 + 0.5;
+    }
+    
+    return { positions, colors, sizes };
+  }, []);
+  
+  useFrame((state) => {
+    if (starsRef.current) {
+      starsRef.current.rotation.y = state.clock.elapsedTime * 0.008;
+      starsRef.current.rotation.x = Math.sin(state.clock.elapsedTime * 0.002) * 0.05;
+    }
+    
+    if (nebula1Ref.current) {
+      nebula1Ref.current.rotation.z = state.clock.elapsedTime * 0.02;
+    }
+    
+    if (nebula2Ref.current) {
+      nebula2Ref.current.rotation.z = -state.clock.elapsedTime * 0.015;
+    }
+  });
+  
+  return (
+    <>
+      {/* Stars */}
+      <points ref={starsRef}>
+        <bufferGeometry>
+          <bufferAttribute
+            attach="attributes-position"
+            args={[starData.positions, 3]}
+          />
+          <bufferAttribute
+            attach="attributes-color"
+            args={[starData.colors, 3]}
+          />
+          <bufferAttribute
+            attach="attributes-size"
+            args={[starData.sizes, 1]}
+          />
+        </bufferGeometry>
+        <pointsMaterial
+          size={0.2}
+          vertexColors
+          transparent
+          opacity={0.95}
+          sizeAttenuation
+        />
+      </points>
       
-      const distance = 170 + Math.random() * 35;
-      const angle = Math.random() * Math.PI * 2;
-      asteroid.position.set(
-        Math.cos(angle) * distance,
-        (Math.random() - 0.5) * 12,
-        Math.sin(angle) * distance
-      );
-      asteroid.rotation.set(
+      {/* Nebula clouds */}
+      <mesh ref={nebula1Ref} position={[-15, 10, -30]}>
+        <sphereGeometry args={[10, 32, 32]} />
+        <meshBasicMaterial
+          color="#4c1d95"
+          transparent
+          opacity={0.15}
+          side={THREE.BackSide}
+        />
+      </mesh>
+      
+      <mesh ref={nebula2Ref} position={[18, -8, -35]}>
+        <sphereGeometry args={[12, 32, 32]} />
+        <meshBasicMaterial
+          color="#1e3a8a"
+          transparent
+          opacity={0.12}
+          side={THREE.BackSide}
+        />
+      </mesh>
+      
+      {/* Space fog */}
+      <fog attach="fog" args={["#000510", 25, 100]} />
+    </>
+  );
+}
+
+// ============================================
+// FLOATING ASTEROIDS
+// ============================================
+function Asteroids() {
+  const groupRef = useRef<THREE.Group>(null);
+  
+  const asteroidData = useMemo(() => {
+    return Array.from({ length: 12 }, () => ({
+      position: [
+        (Math.random() - 0.5) * 40,
+        (Math.random() - 0.5) * 30,
+        -20 - Math.random() * 30
+      ] as [number, number, number],
+      rotation: [
         Math.random() * Math.PI,
         Math.random() * Math.PI,
         Math.random() * Math.PI
-      );
-      asteroidGroup.add(asteroid);
+      ] as [number, number, number],
+      scale: 0.3 + Math.random() * 0.5,
+      speed: 0.2 + Math.random() * 0.3
+    }));
+  }, []);
+  
+  useFrame((state, delta) => {
+    if (groupRef.current) {
+      groupRef.current.children.forEach((child, idx) => {
+        child.rotation.x += delta * asteroidData[idx].speed;
+        child.rotation.y += delta * asteroidData[idx].speed * 0.7;
+      });
     }
-    scene.add(asteroidGroup);
+  });
+  
+  return (
+    <group ref={groupRef}>
+      {asteroidData.map((data, i) => (
+        <mesh
+          key={i}
+          position={data.position}
+          rotation={data.rotation}
+          scale={data.scale}
+        >
+          <dodecahedronGeometry args={[1, 1]} />
+          <meshStandardMaterial
+            color="#334155"
+            metalness={0.6}
+            roughness={0.8}
+          />
+        </mesh>
+      ))}
+    </group>
+  );
+}
 
-    // Advanced Spaceship
-    const createAdvancedSpaceship = () => {
-      const spaceshipGroup = new THREE.Group();
+// ============================================
+// MAIN START SCREEN
+// ============================================
+export default function StartScreen({ onStart }: { onStart: () => void }) {
+  const [loading, setLoading] = useState(true);
+  const [bounce, setBounce] = useState(false);
+  const [progress, setProgress] = useState(0);
+
+  useEffect(() => {
+    let currentProgress = 0;
+    const progressSteps = [
+      { target: 35, duration: 600 },
+      { target: 65, duration: 800 },
+      { target: 90, duration: 500 },
+      { target: 100, duration: 400 },
+    ];
+
+    let stepIndex = 0;
+    const animateProgress = () => {
+      if (stepIndex >= progressSteps.length) return;
       
-      // Main body - sleek design
-      const bodyGeometry = new THREE.CylinderGeometry(5, 5, 16, 32);
-      const bodyMaterial = new THREE.MeshStandardMaterial({
-        color: 0xf0f0f0,
-        metalness: 0.9,
-        roughness: 0.1
-      });
-      const body = new THREE.Mesh(bodyGeometry, bodyMaterial);
-      body.rotation.z = Math.PI / 2;
-      body.castShadow = true;
-      spaceshipGroup.add(body);
+      const step = progressSteps[stepIndex];
+      const startProgress = currentProgress;
+      const startTime = Date.now();
       
-      // Nose cone
-      const noseGeometry = new THREE.ConeGeometry(5, 8, 32);
-      const nose = new THREE.Mesh(noseGeometry, bodyMaterial);
-      nose.rotation.z = -Math.PI / 2;
-      nose.position.x = 12;
-      nose.castShadow = true;
-      spaceshipGroup.add(nose);
-      
-      // Back end
-      const backGeometry = new THREE.ConeGeometry(5, 4, 32);
-      const back = new THREE.Mesh(backGeometry, bodyMaterial);
-      back.rotation.z = Math.PI / 2;
-      back.position.x = -8;
-      spaceshipGroup.add(back);
-
-      // Orange accent bands
-      for (let i = 0; i < 3; i++) {
-        const ringGeometry = new THREE.TorusGeometry(5.2, 0.5, 16, 32);
-        const ringMaterial = new THREE.MeshStandardMaterial({
-          color: 0xff8c00,
-          metalness: 0.8,
-          roughness: 0.2,
-          emissive: 0xff8c00,
-          emissiveIntensity: 0.3
-        });
-        const ring = new THREE.Mesh(ringGeometry, ringMaterial);
-        ring.rotation.y = Math.PI / 2;
-        ring.position.x = -4 + i * 5;
-        spaceshipGroup.add(ring);
-      }
-
-      // Cockpit window - large curved
-      const windowGeometry = new THREE.SphereGeometry(4.5, 32, 32, 0, Math.PI * 0.6);
-      const windowMaterial = new THREE.MeshPhysicalMaterial({
-        color: 0x88ddff,
-        transparent: true,
-        opacity: 0.7,
-        metalness: 0.1,
-        roughness: 0,
-        transmission: 0.9,
-        thickness: 0.5
-      });
-      const window1 = new THREE.Mesh(windowGeometry, windowMaterial);
-      window1.rotation.y = -Math.PI / 2;
-      window1.position.set(8, 0, 0);
-      spaceshipGroup.add(window1);
-
-      // Side windows
-      for (let side of [-1, 1]) {
-        const sideWindowGeometry = new THREE.CircleGeometry(1.5, 32);
-        const sideWindow = new THREE.Mesh(sideWindowGeometry, windowMaterial);
-        sideWindow.position.set(2, 0, side * 5.2);
-        sideWindow.rotation.y = side * Math.PI / 2;
-        spaceshipGroup.add(sideWindow);
-      }
-
-      // Engine exhausts - triple
-      for (let i = 0; i < 3; i++) {
-        const angle = (i / 3) * Math.PI * 2;
-        const radius = 3;
+      const animate = () => {
+        const elapsed = Date.now() - startTime;
+        const progress = Math.min(elapsed / step.duration, 1);
         
-        const engineGeometry = new THREE.CylinderGeometry(1.2, 1.8, 4, 16);
-        const engineMaterial = new THREE.MeshStandardMaterial({
-          color: 0x333333,
-          metalness: 1,
-          roughness: 0.3
-        });
-        const engine = new THREE.Mesh(engineGeometry, engineMaterial);
-        engine.rotation.z = Math.PI / 2;
-        engine.position.set(
-          -10,
-          Math.cos(angle) * radius,
-          Math.sin(angle) * radius
-        );
-        spaceshipGroup.add(engine);
-
-        // Engine glow
-        const glowGeometry = new THREE.CylinderGeometry(1.5, 2.5, 3, 16);
-        const glowMaterial = new THREE.MeshBasicMaterial({
-          color: 0x00d9ff,
-          transparent: true,
-          opacity: 0.8
-        });
-        const glow = new THREE.Mesh(glowGeometry, glowMaterial);
-        glow.rotation.z = Math.PI / 2;
-        glow.position.set(
-          -11.5,
-          Math.cos(angle) * radius,
-          Math.sin(angle) * radius
-        );
-        spaceshipGroup.add(glow);
-
-        // Engine light
-        const engineLight = new THREE.PointLight(0x00d9ff, 2, 30);
-        engineLight.position.set(
-          -12,
-          Math.cos(angle) * radius,
-          Math.sin(angle) * radius
-        );
-        spaceshipGroup.add(engineLight);
-      }
-
-      // Wings
-      for (let side of [-1, 1]) {
-        const wingGeometry = new THREE.BoxGeometry(6, 0.5, 12);
-        const wingMaterial = new THREE.MeshStandardMaterial({
-          color: 0xdddddd,
-          metalness: 0.8,
-          roughness: 0.2
-        });
-        const wing = new THREE.Mesh(wingGeometry, wingMaterial);
-        wing.position.set(-2, 0, side * 8);
-        wing.rotation.y = side * 0.2;
-        wing.castShadow = true;
-        spaceshipGroup.add(wing);
-
-        // Wing tip lights
-        const tipLightGeometry = new THREE.SphereGeometry(0.5, 16, 16);
-        const tipLightMaterial = new THREE.MeshBasicMaterial({
-          color: side === 1 ? 0x00ff00 : 0xff0000,
-          emissive: side === 1 ? 0x00ff00 : 0xff0000
-        });
-        const tipLight = new THREE.Mesh(tipLightGeometry, tipLightMaterial);
-        tipLight.position.set(-2, 0, side * 14);
-        spaceshipGroup.add(tipLight);
-      }
-
-      // Communication antenna
-      const antennaGeometry = new THREE.CylinderGeometry(0.3, 0.3, 10, 16);
-      const antennaMaterial = new THREE.MeshStandardMaterial({
-        color: 0xcccccc,
-        metalness: 0.9,
-        roughness: 0.1
-      });
-      const antenna = new THREE.Mesh(antennaGeometry, antennaMaterial);
-      antenna.position.set(0, 10, 0);
-      spaceshipGroup.add(antenna);
-
-      // Satellite dish
-      const dishGeometry = new THREE.CylinderGeometry(3, 2, 0.8, 32);
-      const dishMaterial = new THREE.MeshStandardMaterial({
-        color: 0xffffff,
-        metalness: 0.8,
-        roughness: 0.2
-      });
-      const dish = new THREE.Mesh(dishGeometry, dishMaterial);
-      dish.position.set(0, 14, 0);
-      dish.rotation.x = Math.PI * 0.2;
-      spaceshipGroup.add(dish);
-
-      // Blinking red light on antenna
-      const redLightGeometry = new THREE.SphereGeometry(0.5, 16, 16);
-      const redLightMaterial = new THREE.MeshBasicMaterial({
-        color: 0xff0000,
-        emissive: 0xff0000
-      });
-      const redLight = new THREE.Mesh(redLightGeometry, redLightMaterial);
-      redLight.position.set(0, 15.5, 0);
-      spaceshipGroup.add(redLight);
-
-      const redLightPoint = new THREE.PointLight(0xff0000, 1, 20);
-      redLightPoint.position.set(0, 15.5, 0);
-      spaceshipGroup.add(redLightPoint);
-
-      return spaceshipGroup;
-    };
-
-    const spaceship = createAdvancedSpaceship();
-    spaceship.position.set(-300, 80, 200);
-    spaceship.rotation.y = Math.PI / 4;
-    spaceship.scale.set(1.5, 1.5, 1.5);
-    scene.add(spaceship);
-
-    // Animation
-    let time = 0;
-    const animate = () => {
-      requestAnimationFrame(animate);
-      time += 0.01;
-
-      // Rotate sun group
-      sunGroup.rotation.y += 0.001;
-      sunGroup.children.forEach((child, i) => {
-        if (i > 0) {
-          child.rotation.y -= 0.0005 * i;
-        }
-      });
-
-      // Animate planets in 3D orbital motion
-      planets.forEach((planet, index) => {
-        planet.angle += planet.speed * 0.01;
+        const easeOutQuad = (t: number) => t * (2 - t);
+        currentProgress = startProgress + (step.target - startProgress) * easeOutQuad(progress);
         
-        // 3D orbital path
-        const orbitTilt = Math.sin(planet.angle) * planet.tilt * 10;
-        planet.mesh.position.x = Math.cos(planet.angle) * planet.distance;
-        planet.mesh.position.z = Math.sin(planet.angle) * planet.distance;
-        planet.mesh.position.y = Math.sin(planet.angle * 2) * planet.tilt * 15;
+        setProgress(Math.floor(currentProgress));
         
-        // Rotate planet on its axis
-        planet.mesh.rotation.y += planet.rotationSpeed;
-        
-        // Tilt planet
-        planet.mesh.rotation.z = planet.tilt * 2;
-      });
-
-      // Animate orbit lines
-      orbitLines.forEach((orbit, i) => {
-        orbit.rotation.z += 0.0001 * (i + 1);
-      });
-
-      // Rotate asteroid belt
-      asteroidGroup.rotation.y += 0.0003;
-      asteroidGroup.children.forEach(asteroid => {
-        asteroid.rotation.x += 0.001;
-        asteroid.rotation.y += 0.002;
-      });
-
-      // Animate spaceship
-      spaceship.position.x += 0.8;
-      spaceship.position.y += Math.sin(time * 0.5) * 0.15;
-      spaceship.position.z += Math.cos(time * 0.3) * 0.1;
-      spaceship.rotation.z = Math.sin(time * 0.5) * 0.05;
-      spaceship.rotation.x = Math.sin(time * 0.3) * 0.03;
-      
-      if (spaceship.position.x > 500) {
-        spaceship.position.set(-500, 80, 200);
-      }
-
-      // Engine glow pulse
-      spaceship.children.forEach(child => {
-        if (child.material && child.material.color && 
-            child.material.color.getHex() === 0x00d9ff) {
-          const pulse = 0.5 + Math.sin(time * 5) * 0.5;
-          child.material.opacity = pulse;
-        }
-      });
-
-      // Blinking antenna light
-      const blinkSpeed = Math.sin(time * 3);
-      if (spaceship.children.length > 0) {
-        spaceship.children.forEach(child => {
-          if (child instanceof THREE.PointLight && child.color.getHex() === 0xff0000) {
-            child.intensity = blinkSpeed > 0 ? 1 : 0;
+        if (progress < 1) {
+          requestAnimationFrame(animate);
+        } else {
+          stepIndex++;
+          if (stepIndex < progressSteps.length) {
+            setTimeout(animateProgress, 60);
           }
-        });
-      }
-
-      // Rotate stars slowly
-      stars.rotation.y += 0.00005;
-      stars.rotation.x += 0.00002;
-
-      // Gentle camera movement
-      camera.position.x = Math.sin(time * 0.05) * 30;
-      camera.position.y = 250 + Math.cos(time * 0.08) * 20;
-      camera.position.z = 400 + Math.sin(time * 0.06) * 30;
-      camera.lookAt(0, 0, 0);
-
-      renderer.render(scene, camera);
-    };
-
-    // Simulate loading
-    const loadingInterval = setInterval(() => {
-      setLoadProgress(prev => {
-        if (prev >= 100) {
-          clearInterval(loadingInterval);
-          setTimeout(() => setLoading(false), 500);
-          return 100;
         }
-        return prev + 2;
-      });
-    }, 30);
-
-    animate();
-
-    // Handle resize
-    const handleResize = () => {
-      camera.aspect = window.innerWidth / window.innerHeight;
-      camera.updateProjectionMatrix();
-      renderer.setSize(window.innerWidth, window.innerHeight);
+      };
+      
+      animate();
     };
-    window.addEventListener('resize', handleResize);
+    
+    animateProgress();
 
-    return () => {
-      window.removeEventListener('resize', handleResize);
-      if (containerRef.current && renderer.domElement) {
-        containerRef.current.removeChild(renderer.domElement);
-      }
-      renderer.dispose();
-    };
+    const timer = setTimeout(() => {
+      setLoading(false);
+    }, 2500);
+
+    return () => clearTimeout(timer);
   }, []);
 
-  return (
-    <div className="relative w-full h-screen overflow-hidden bg-black">
-      <div ref={containerRef} className="w-full h-full" />
-      
-      {loading && (
-        <div className="absolute inset-0 flex items-center justify-center bg-black bg-opacity-95 z-10">
-          <div className="text-center">
-            <div className="mb-8">
-              <div className="w-40 h-40 mx-auto mb-8 relative">
-                <div className="absolute inset-0 rounded-full border-4 border-blue-500 border-t-transparent animate-spin"></div>
-                <div className="absolute inset-3 rounded-full border-4 border-purple-500 border-t-transparent animate-spin" style={{ animationDirection: 'reverse', animationDuration: '1s' }}></div>
-                <div className="absolute inset-6 rounded-full border-4 border-pink-500 border-t-transparent animate-spin" style={{ animationDuration: '2s' }}></div>
-                <div className="absolute inset-0 flex items-center justify-center">
-                  <div className="w-16 h-16 bg-gradient-to-br from-yellow-400 to-orange-500 rounded-full shadow-lg shadow-yellow-500/50"></div>
-                </div>
-              </div>
-              <h1 className="text-5xl font-bold text-white mb-6 tracking-wider">
-                <span className="bg-gradient-to-r from-blue-400 via-purple-400 to-pink-400 bg-clip-text text-transparent">
-                  INITIALIZING SOLAR SYSTEM
-                </span>
-              </h1>
-              <div className="w-80 h-3 bg-gray-800 rounded-full mx-auto overflow-hidden shadow-inner">
-                <div 
-                  className="h-full bg-gradient-to-r from-blue-500 via-purple-500 to-pink-500 transition-all duration-300 shadow-lg"
-                  style={{ width: `${loadProgress}%` }}
-                ></div>
-              </div>
-              <p className="text-blue-300 mt-6 text-xl font-semibold">{loadProgress}%</p>
-              <p className="text-gray-400 mt-2 text-sm">Loading 3D Solar System...</p>
-            </div>
-          </div>
-        </div>
-      )}
+  const handleClick = () => {
+    if (loading) return;
+    
+    setBounce(true);
+    setTimeout(() => onStart(), 700);
+  };
 
-      {!loading && (
-        <div className="absolute inset-0 pointer-events-none">
-          <div className="absolute top-12 left-1/2 transform -translate-x-1/2 text-center">
-            <h1 className="text-7xl font-bold mb-3 tracking-wider">
-              <span className="bg-gradient-to-r from-blue-400 via-purple-400 to-pink-400 bg-clip-text text-transparent animate-pulse">
-                SPACE PORTFOLIO
-              </span>
-            </h1>
-            <p className="text-2xl text-blue-300 font-light">Explore the Universe of Creativity</p>
+  return (
+    <div className="space-start-screen">
+      {/* 3D Canvas */}
+      <Canvas
+        camera={{ position: [0, 0, 10], fov: 55 }}
+        style={{ position: 'absolute', inset: 0 }}
+        shadows
+      >
+        <color attach="background" args={["#000510"]} />
+        
+        {/* Lighting setup */}
+        <ambientLight intensity={0.2} />
+        <directionalLight
+          position={[10, 10, 5]}
+          intensity={1}
+          castShadow
+          shadow-mapSize-width={2048}
+          shadow-mapSize-height={2048}
+        />
+        <pointLight position={[-10, -10, -5]} intensity={0.5} color="#4c1d95" />
+        <pointLight position={[5, 5, 5]} intensity={0.3} color="#0ea5e9" />
+        
+        <Suspense fallback={null}>
+          <CameraController />
+          <RocketModel />
+          <SpaceEnvironment />
+          <Asteroids />
+        </Suspense>
+      </Canvas>
+
+      {/* UI Overlay */}
+      <div className="ui-content">
+        {/* Title */}
+        <div className="title-wrapper">
+          <h1 className="main-title">SPACE PORTFOLIO</h1>
+          <div className="title-glow"></div>
+        </div>
+
+        {/* Start Button */}
+        <div
+          className={`start-button-container ${!loading ? "ready" : ""} ${bounce ? "bounce" : ""}`}
+          onClick={handleClick}
+        >
+          <div className="orbit-rings">
+            <div className="orbit-ring ring-1"></div>
+            <div className="orbit-ring ring-2"></div>
+            <div className="orbit-ring ring-3"></div>
           </div>
           
-          <div className="absolute bottom-12 left-1/2 transform -translate-x-1/2">
-            <button className="px-10 py-5 bg-gradient-to-r from-blue-600 via-purple-600 to-pink-600 text-white text-xl font-bold rounded-full hover:from-blue-700 hover:via-purple-700 hover:to-pink-700 transition-all transform hover:scale-110 pointer-events-auto shadow-2xl shadow-purple-500/50 border-2 border-white/20">
-              🚀 Enter Portfolio
-            </button>
-          </div>
-
-          <div className="absolute top-1/2 right-12 transform -translate-y-1/2 text-right text-white space-y-4">
-            <div className="bg-gradient-to-br from-blue-900/80 to-purple-900/80 px-6 py-4 rounded-xl backdrop-blur-md border border-white/20 shadow-xl">
-              <p className="text-gray-300 text-sm mb-1">Planets Orbiting</p>
-              <p className="text-3xl font-bold bg-gradient-to-r from-blue-400 to-purple-400 bg-clip-text text-transparent">8</p>
-            </div>
-            <div className="bg-gradient-to-br from-purple-900/80 to-pink-900/80 px-6 py-4 rounded-xl backdrop-blur-md border border-white/20 shadow-xl">
-              <p className="text-gray-300 text-sm mb-1">Asteroids</p>
-              <p className="text-3xl font-bold bg-gradient-to-r from-purple-400 to-pink-400 bg-clip-text text-transparent">1200+</p>
-            </div>
-            <div className="bg-gradient-to-br from-pink-900/80 to-blue-900/80 px-6 py-4 rounded-xl backdrop-blur-md border border-white/20 shadow-xl">
-              <p className="text-gray-300 text-sm mb-1">Stars</p>
-              <p className="text-3xl font-bold bg-gradient-to-r from-pink-400 to-blue-400 bg-clip-text text-transparent">15K+</p>
-            </div>
-            <div className="bg-gradient-to-br from-cyan-900/80 to-blue-900/80 px-6 py-4 rounded-xl backdrop-blur-md border border-white/20 shadow-xl">
-              <p className="text-gray-300 text-sm mb-1">Spacecraft</p>
-              <p className="text-3xl font-bold bg-gradient-to-r from-cyan-400 to-blue-400 bg-clip-text text-transparent">Active</p>
-            </div>
-          </div>
-
-          <div className="absolute bottom-12 left-12 text-white space-y-2">
-            <div className="bg-black/60 px-4 py-2 rounded-lg backdrop-blur-sm border border-white/10">
-              <p className="text-xs text-gray-400">System Status</p>
-              <div className="flex items-center gap-2 mt-1">
-                <div className="w-2 h-2 bg-green-500 rounded-full animate-pulse"></div>
-                <p className="text-sm font-semibold text-green-400">All Systems Operational</p>
-              </div>
-            </div>
+          <div className="button-core">
+            {loading ? (
+              <>
+                <div className="loading-spinner">
+                  <div className="spinner-orbit"></div>
+                  <div className="spinner-orbit"></div>
+                  <div className="spinner-orbit"></div>
+                </div>
+                <div className="status-text">INITIALIZING</div>
+                <div className="progress-track">
+                  <div className="progress-bar" style={{ width: `${progress}%` }}>
+                    <div className="progress-shine"></div>
+                  </div>
+                </div>
+                <div className="progress-value">{progress}%</div>
+              </>
+            ) : (
+              <>
+                <div className="launch-icon">🚀</div>
+                <div className="launch-text">START JOURNEY</div>
+                <div className="launch-subtitle">Click to Launch</div>
+                <div className="pulse-wave"></div>
+                <div className="pulse-wave" style={{ animationDelay: '1s' }}></div>
+              </>
+            )}
           </div>
         </div>
-      )}
+
+        {/* Bottom Indicator */}
+        <div className="bottom-indicator">
+          <div className="indicator-line"></div>
+          <div className="indicator-text">READY FOR LAUNCH</div>
+          <div className="indicator-line"></div>
+        </div>
+      </div>
+
+      <style>{`
+        * {
+          margin: 0;
+          padding: 0;
+          box-sizing: border-box;
+        }
+
+        .space-start-screen {
+          width: 100vw;
+          height: 100vh;
+          position: relative;
+          overflow: hidden;
+          background: #000510;
+          font-family: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+        }
+
+        .ui-content {
+          position: absolute;
+          inset: 0;
+          display: flex;
+          flex-direction: column;
+          align-items: center;
+          justify-content: space-between;
+          padding: 80px 0;
+          pointer-events: none;
+          z-index: 10;
+        }
+
+        /* ===== TITLE ===== */
+        .title-wrapper {
+          position: relative;
+          text-align: center;
+          animation: titleEntrance 1.5s cubic-bezier(0.34, 1.56, 0.64, 1);
+        }
+
+        @keyframes titleEntrance {
+          0% {
+            opacity: 0;
+            transform: translateY(-100px) scale(0.5);
+          }
+          100% {
+            opacity: 1;
+            transform: translateY(0) scale(1);
+          }
+        }
+
+        .main-title {
+          font-size: 80px;
+          font-weight: 900;
+          letter-spacing: 16px;
+          background: linear-gradient(135deg, #00d4ff 0%, #0ea5e9 30%, #06b6d4 60%, #00d4ff 100%);
+          background-size: 300% 300%;
+          -webkit-background-clip: text;
+          background-clip: text;
+          -webkit-text-fill-color: transparent;
+          animation: gradientFlow 4s ease infinite;
+          position: relative;
+          margin: 0;
+          text-shadow: 0 0 100px rgba(0, 212, 255, 0.6);
+          filter: drop-shadow(0 0 40px rgba(0, 212, 255, 0.4));
+        }
+
+        @keyframes gradientFlow {
+          0%, 100% { background-position: 0% 50%; }
+          50% { background-position: 100% 50%; }
+        }
+
+        .title-glow {
+          position: absolute;
+          top: 50%;
+          left: 50%;
+          transform: translate(-50%, -50%);
+          width: 100%;
+          height: 100%;
+          background: radial-gradient(circle, rgba(0, 212, 255, 0.3), transparent 70%);
+          filter: blur(40px);
+          animation: glowPulse 3s ease-in-out infinite;
+        }
+
+        @keyframes glowPulse {
+          0%, 100% { opacity: 0.5; transform: translate(-50%, -50%) scale(1); }
+          50% { opacity: 1; transform: translate(-50%, -50%) scale(1.2); }
+        }
+
+        /* ===== START BUTTON ===== */
+        .start-button-container {
+          position: relative;
+          width: 380px;
+          height: 380px;
+          pointer-events: auto;
+          cursor: pointer;
+          animation: buttonEntrance 1.2s cubic-bezier(0.34, 1.56, 0.64, 1) 0.5s backwards;
+          transition: transform 0.4s cubic-bezier(0.34, 1.56, 0.64, 1);
+        }
+
+        @keyframes buttonEntrance {
+          0% {
+            opacity: 0;
+            transform: scale(0) rotate(-180deg);
+          }
+          100% {
+            opacity: 1;
+            transform: scale(1) rotate(0deg);
+          }
+        }
+
+        .start-button-container:hover {
+          transform: scale(1.05);
+        }
+
+        .start-button-container.ready:hover {
+          transform: scale(1.12);
+        }
+
+        .start-button-container.bounce {
+          animation: buttonBounceOut 0.7s cubic-bezier(0.68, -0.55, 0.265, 1.55);
+        }
+
+        @keyframes buttonBounceOut {
+          0%, 100% { transform: scale(1); }
+          30% { transform: scale(1.3); }
+          60% { transform: scale(0.9); }
+        }
+
+        /* ===== ORBIT RINGS ===== */
+        .orbit-rings {
+          position: absolute;
+          inset: 0;
+        }
+
+        .orbit-ring {
+          position: absolute;
+          border: 2px solid transparent;
+          border-radius: 50%;
+          border-top-color: #0ea5e9;
+          border-right-color: #00d4ff;
+          animation: ringRotate 4s linear infinite;
+        }
+
+        .ring-1 {
+          inset: 0;
+          opacity: 0.7;
+          box-shadow: 0 0 20px rgba(14, 165, 233, 0.3);
+        }
+
+        .ring-2 {
+          inset: 25px;
+          animation-duration: 3s;
+          animation-direction: reverse;
+          opacity: 0.5;
+          border-top-color: #06b6d4;
+          border-right-color: #0ea5e9;
+          .ring-3 {
+  inset: 50px;
+  animation-duration: 5s;
+  opacity: 0.3;
+  border-top-color: #00d4ff;
+  border-right-color: #06b6d4;
+}
+
+@keyframes ringRotate {
+  0% { transform: rotate(0deg); }
+  100% { transform: rotate(360deg); }
+}
+
+/* ===== BUTTON CORE ===== */
+.button-core {
+  position: absolute;
+  inset: 80px;
+  background: linear-gradient(135deg, rgba(14, 165, 233, 0.15), rgba(6, 182, 212, 0.1));
+  border: 2px solid rgba(0, 212, 255, 0.3);
+  border-radius: 50%;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 20px;
+  backdrop-filter: blur(10px);
+  box-shadow: 
+    0 0 60px rgba(0, 212, 255, 0.2),
+    inset 0 0 40px rgba(0, 212, 255, 0.1);
+  transition: all 0.3s ease;
+  overflow: hidden;
+}
+
+.start-button-container.ready .button-core {
+  background: linear-gradient(135deg, rgba(14, 165, 233, 0.25), rgba(6, 182, 212, 0.2));
+  border-color: rgba(0, 212, 255, 0.5);
+  box-shadow: 
+    0 0 80px rgba(0, 212, 255, 0.3),
+    inset 0 0 60px rgba(0, 212, 255, 0.15);
+  animation: coreGlow 2s ease-in-out infinite alternate;
+}
+
+@keyframes coreGlow {
+  0% { box-shadow: 0 0 80px rgba(0, 212, 255, 0.3), inset 0 0 60px rgba(0, 212, 255, 0.15); }
+  100% { box-shadow: 0 0 120px rgba(0, 212, 255, 0.5), inset 0 0 80px rgba(0, 212, 255, 0.25); }
+}
+
+/* ===== LOADING STATE ===== */
+.loading-spinner {
+  position: relative;
+  width: 60px;
+  height: 60px;
+}
+
+.spinner-orbit {
+  position: absolute;
+  border: 2px solid transparent;
+  border-radius: 50%;
+  border-top-color: #00d4ff;
+  animation: spin 1.5s linear infinite;
+}
+
+.spinner-orbit:nth-child(1) {
+  inset: 0;
+  animation-delay: 0s;
+}
+
+.spinner-orbit:nth-child(2) {
+  inset: 8px;
+  animation-delay: 0.1s;
+  animation-duration: 1.2s;
+}
+
+.spinner-orbit:nth-child(3) {
+  inset: 16px;
+  animation-delay: 0.2s;
+  animation-duration: 0.9s;
+}
+
+@keyframes spin {
+  0% { transform: rotate(0deg); }
+  100% { transform: rotate(360deg); }
+}
+
+.status-text {
+  color: #00d4ff;
+  font-size: 14px;
+  font-weight: 600;
+  letter-spacing: 3px;
+  text-transform: uppercase;
+}
+
+.progress-track {
+  width: 160px;
+  height: 4px;
+  background: rgba(0, 212, 255, 0.2);
+  border-radius: 2px;
+  overflow: hidden;
+  position: relative;
+}
+
+.progress-bar {
+  height: 100%;
+  background: linear-gradient(90deg, #00d4ff, #0ea5e9);
+  border-radius: 2px;
+  position: relative;
+  transition: width 0.3s ease;
+}
+
+.progress-shine {
+  position: absolute;
+  top: 0;
+  left: -100%;
+  width: 100%;
+  height: 100%;
+  background: linear-gradient(90deg, transparent, rgba(255, 255, 255, 0.6), transparent);
+  animation: shine 1.5s ease-in-out infinite;
+}
+
+@keyframes shine {
+  0% { left: -100%; }
+  100% { left: 100%; }
+}
+
+.progress-value {
+  color: #00d4ff;
+  font-size: 12px;
+  font-weight: 600;
+  letter-spacing: 1px;
+}
+
+/* ===== READY STATE ===== */
+.launch-icon {
+  font-size: 48px;
+  filter: drop-shadow(0 0 20px rgba(0, 212, 255, 0.8));
+  animation: float 3s ease-in-out infinite;
+}
+
+@keyframes float {
+  0%, 100% { transform: translateY(0px); }
+  50% { transform: translateY(-10px); }
+}
+
+.launch-text {
+  color: #00d4ff;
+  font-size: 18px;
+  font-weight: 700;
+  letter-spacing: 4px;
+  text-transform: uppercase;
+  text-shadow: 0 0 20px rgba(0, 212, 255, 0.8);
+  animation: textGlow 2s ease-in-out infinite alternate;
+}
+
+@keyframes textGlow {
+  0% { text-shadow: 0 0 20px rgba(0, 212, 255, 0.8); }
+  100% { text-shadow: 0 0 30px rgba(0, 212, 255, 1), 0 0 40px rgba(0, 212, 255, 0.6); }
+}
+
+.launch-subtitle {
+  color: rgba(0, 212, 255, 0.7);
+  font-size: 12px;
+  font-weight: 500;
+  letter-spacing: 2px;
+  text-transform: uppercase;
+}
+
+.pulse-wave {
+  position: absolute;
+  inset: -10px;
+  border: 2px solid rgba(0, 212, 255, 0.5);
+  border-radius: 50%;
+  animation: pulse 2s ease-out infinite;
+}
+
+@keyframes pulse {
+  0% {
+    transform: scale(1);
+    opacity: 1;
+  }
+  100% {
+    transform: scale(1.3);
+    opacity: 0;
+  }
+}
+
+/* ===== BOTTOM INDICATOR ===== */
+.bottom-indicator {
+  display: flex;
+  align-items: center;
+  gap: 20px;
+  color: rgba(0, 212, 255, 0.8);
+  font-size: 12px;
+  font-weight: 600;
+  letter-spacing: 3px;
+  text-transform: uppercase;
+  animation: fadeInUp 1s ease 1s backwards;
+}
+
+@keyframes fadeInUp {
+  0% {
+    opacity: 0;
+    transform: translateY(30px);
+  }
+  100% {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+.indicator-line {
+  width: 60px;
+  height: 2px;
+  background: linear-gradient(90deg, transparent, #00d4ff, transparent);
+  position: relative;
+}
+
+.indicator-line::before {
+  content: '';
+  position: absolute;
+  top: 50%;
+  left: 0;
+  transform: translateY(-50%);
+  width: 6px;
+  height: 6px;
+  background: #00d4ff;
+  border-radius: 50%;
+  animation: dotMove 2s ease-in-out infinite;
+}
+
+@keyframes dotMove {
+  0%, 100% { left: 0; opacity: 0; }
+  50% { left: 100%; opacity: 1; }
+}
+
+.indicator-text {
+  animation: textPulse 3s ease-in-out infinite;
+}
+
+@keyframes textPulse {
+  0%, 100% { opacity: 0.6; }
+  50% { opacity: 1; }
+}
+
+/* ===== RESPONSIVE DESIGN ===== */
+@media (max-width: 768px) {
+  .main-title {
+    font-size: 50px;
+    letter-spacing: 8px;
+  }
+
+  .start-button-container {
+    width: 300px;
+    height: 300px;
+  }
+
+  .button-core {
+    inset: 60px;
+  }
+
+  .launch-text {
+    font-size: 16px;
+    letter-spacing: 2px;
+  }
+
+  .ui-content {
+    padding: 60px 0;
+  }
+}
+
+@media (max-width: 480px) {
+  .main-title {
+    font-size: 36px;
+    letter-spacing: 4px;
+  }
+
+  .start-button-container {
+    width: 250px;
+    height: 250px;
+  }
+
+  .button-core {
+    inset: 50px;
+    gap: 15px;
+  }
+
+  .launch-icon {
+    font-size: 36px;
+  }
+
+  .launch-text {
+    font-size: 14px;
+    letter-spacing: 1px;
+  }
+
+  .bottom-indicator {
+    font-size: 10px;
+    letter-spacing: 2px;
+  }
+}
+`}</style>
     </div>
   );
-};
-
-export default SpacePortfolio; 
+}
